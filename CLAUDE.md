@@ -87,6 +87,9 @@ Hi! I'm Claude, and I'm here to help you make your little pink monster game! Her
 - Add difficulty settings that a 6-year-old can understand
 - Test on various screen sizes (phones, tablets, desktop)
 
+### Tool Memories
+- We used pixellab to make images and animations
+
 ## Quick Commands
 
 When you're ready to:

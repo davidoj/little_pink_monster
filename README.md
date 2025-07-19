@@ -18,7 +18,7 @@ This is a mobile-friendly game created using:
 
 - **On Mobile**: Touch the screen to move
 - **On Computer**: Use arrow keys or WASD to move
-- Chase the little pink monster and have fun!
+- Chase the little pink monster and have fun!2
 
 ## Development
 
