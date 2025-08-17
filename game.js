@@ -21,6 +21,7 @@ window.addEventListener('resize', resizeCanvas);
 let gameStarted = false;
 let score = 0;
 let animationTime = 0;
+let debugMode = true; // Toggle with 'B' key to show collision boundaries
 
 // Platformer physics
 const GRAVITY = 0.8;
@@ -79,7 +80,7 @@ const player = {
     y: 100,
     width: 64,  // Will be set based on sprite
     height: 64, // Will be set based on sprite
-    speed: 5,
+    speed: 8,
     velocityX: 0,
     velocityY: 0,
     onGround: false,
@@ -97,7 +98,7 @@ const pinkMonster = {
     y: 300,
     width: 64,
     height: 64,
-    speed: 3,
+    speed: 7,
     velocityX: 0,
     velocityY: 0,
     onGround: false,
@@ -115,7 +116,7 @@ const greenMonster = {
     y: 200,
     width: 64,
     height: 64,
-    speed: 2.5,
+    speed: 6,
     velocityX: 0,
     velocityY: 0,
     onGround: false,
@@ -133,7 +134,14 @@ const monsters = [pinkMonster, greenMonster];
 // Handle keyboard input
 const keys = {};
 window.addEventListener('keydown', (e) => {
-    keys[e.key.toLowerCase()] = true;
+    const key = e.key.toLowerCase();
+    keys[key] = true;
+    
+    // Toggle debug mode with 'B' key
+    if (key === 'b') {
+        debugMode = !debugMode;
+        console.log('Debug mode:', debugMode ? 'ON' : 'OFF');
+    }
 });
 window.addEventListener('keyup', (e) => {
     keys[e.key.toLowerCase()] = false;
@@ -216,16 +224,19 @@ startButton.addEventListener('click', () => {
     
     // Set sprite dimensions after images are loaded (with scaling)
     if (sprites.girl.complete && sprites.girl.naturalHeight > 0) {
-        player.height = sprites.girl.naturalHeight * SPRITE_SCALE;
-        player.width = (sprites.girl.naturalWidth / player.frameCount) * SPRITE_SCALE;
+        player.height = sprites.girl.naturalHeight * SPRITE_SCALE; // Full height
+        player.width = (sprites.girl.naturalWidth / player.frameCount) * SPRITE_SCALE * 0.7; // Narrower width
+        player.visualWidth = (sprites.girl.naturalWidth / player.frameCount) * SPRITE_SCALE; // Full visual width
     }
     if (sprites.pinkMonster.complete && sprites.pinkMonster.naturalHeight > 0) {
-        pinkMonster.height = sprites.pinkMonster.naturalHeight * SPRITE_SCALE;
-        pinkMonster.width = (sprites.pinkMonster.naturalWidth / pinkMonster.frameCount) * SPRITE_SCALE;
+        pinkMonster.height = sprites.pinkMonster.naturalHeight * SPRITE_SCALE; // Full height
+        pinkMonster.width = (sprites.pinkMonster.naturalWidth / pinkMonster.frameCount) * SPRITE_SCALE * 0.7; // Narrower width
+        pinkMonster.visualWidth = (sprites.pinkMonster.naturalWidth / pinkMonster.frameCount) * SPRITE_SCALE; // Full visual width
     }
     if (sprites.greenMonster.complete && sprites.greenMonster.naturalHeight > 0) {
-        greenMonster.height = sprites.greenMonster.naturalHeight * SPRITE_SCALE;
-        greenMonster.width = (sprites.greenMonster.naturalWidth / greenMonster.frameCount) * SPRITE_SCALE;
+        greenMonster.height = sprites.greenMonster.naturalHeight * SPRITE_SCALE; // Full height
+        greenMonster.width = (sprites.greenMonster.naturalWidth / greenMonster.frameCount) * SPRITE_SCALE * 0.7; // Narrower width
+        greenMonster.visualWidth = (sprites.greenMonster.naturalWidth / greenMonster.frameCount) * SPRITE_SCALE; // Full visual width
     }
     
     // Position characters on the ground
@@ -339,18 +350,22 @@ function drawSprite(character) {
             }
         }
         
-        // Calculate source position in sprite sheet
-        const sourceWidth = character.width / SPRITE_SCALE;  // Original sprite width
-        const sourceHeight = character.height / SPRITE_SCALE; // Original sprite height
-        const sx = frameIndex * sourceWidth;
+        // Calculate source position in sprite sheet - use actual sprite dimensions
+        const actualFrameWidth = character.sprite.naturalWidth / character.frameCount;
+        const actualFrameHeight = character.sprite.naturalHeight;
+        const sx = frameIndex * actualFrameWidth;
         
-        // Draw the sprite centered at screen position (scaled up)
+        // Use visual width if available (the full-size sprite display width)
+        const visualWidth = character.visualWidth || (actualFrameWidth * SPRITE_SCALE);
+        const visualHeight = character.height; // Already at correct scale
+        
+        // Draw the sprite centered at screen position
         ctx.drawImage(
             character.sprite,
-            sx, 0, sourceWidth, sourceHeight,  // Source rectangle (original size)
-            screenX - character.width/2, 
-            screenY - character.height/2, 
-            character.width, character.height  // Destination rectangle (scaled size)
+            sx, 0, actualFrameWidth, actualFrameHeight,  // Source rectangle from sprite sheet
+            screenX - visualWidth/2, 
+            screenY - visualHeight/2, 
+            visualWidth, visualHeight  // Destination rectangle (visual size)
         );
     }
 }
@@ -406,6 +421,113 @@ function updatePlayer() {
     player.isMoving = horizontalMovement;
 }
 
+// Check if monster is approaching a platform edge
+function detectPlatformEdge(monster) {
+    if (!monster.onGround) return null;
+    
+    // Find current platform
+    let currentPlatform = null;
+    const monsterBottom = monster.y + monster.height/2;
+    
+    for (const platform of platforms) {
+        if (monster.x >= platform.x && 
+            monster.x <= platform.x + platform.width &&
+            Math.abs(monsterBottom - platform.y) < 10) {
+            currentPlatform = platform;
+            break;
+        }
+    }
+    
+    if (!currentPlatform) return null;
+    
+    // Check if approaching edge based on velocity direction
+    const movingRight = monster.velocityX > 0;
+    const movingLeft = monster.velocityX < 0;
+    
+    if (movingRight) {
+        const distanceToEdge = (currentPlatform.x + currentPlatform.width) - monster.x;
+        // Look for platform to jump to on the right
+        for (const platform of platforms) {
+            if (platform === currentPlatform) continue;
+            const gap = platform.x - (currentPlatform.x + currentPlatform.width);
+            const heightDiff = currentPlatform.y - platform.y;
+            
+            // Platform is to the right, within jump distance, and not too high
+            if (gap > 0 && gap < 300 && Math.abs(heightDiff) < 200) {
+                // Calculate buffer based on speed and height difference
+                const buffer = Math.max(80, Math.min(200, monster.speed * 15 + Math.abs(heightDiff) * 0.5));
+                if (distanceToEdge < buffer) {
+                    return { shouldJump: true, jumpStrength: heightDiff > 0 ? 1.0 : 1.2 };
+                }
+            }
+        }
+    } else if (movingLeft) {
+        const distanceToEdge = monster.x - currentPlatform.x;
+        // Look for platform to jump to on the left
+        for (const platform of platforms) {
+            if (platform === currentPlatform) continue;
+            const gap = currentPlatform.x - (platform.x + platform.width);
+            const heightDiff = currentPlatform.y - platform.y;
+            
+            // Platform is to the left, within jump distance, and not too high
+            if (gap > 0 && gap < 300 && Math.abs(heightDiff) < 200) {
+                // Calculate buffer based on speed and height difference
+                const buffer = Math.max(80, Math.min(200, monster.speed * 15 + Math.abs(heightDiff) * 0.5));
+                if (distanceToEdge < buffer) {
+                    return { shouldJump: true, jumpStrength: heightDiff > 0 ? 1.0 : 1.2 };
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Check if there's a platform the monster can jump to
+function detectPlatformToJump(monster) {
+    // Look for platforms above and nearby
+    const monsterRect = {
+        x: monster.x - monster.width/2,
+        y: monster.y - monster.height/2,
+        width: monster.width,
+        height: monster.height
+    };
+    
+    for (const platform of platforms) {
+        // Check if platform is above and reachable
+        const platformAbove = platform.y < monsterRect.y && 
+                            platform.y > monsterRect.y - 250; // Increased jump range
+        const platformNearby = Math.abs(platform.x - monster.x) < 350 || 
+                              Math.abs((platform.x + platform.width) - monster.x) < 350;
+        
+        if (platformAbove && platformNearby && monster.onGround) {
+            // Check horizontal alignment
+            const needsToMoveRight = monster.x < platform.x;
+            const needsToMoveLeft = monster.x > platform.x + platform.width;
+            
+            if (needsToMoveRight || needsToMoveLeft) {
+                // Move towards the platform
+                monster.velocityX = needsToMoveRight ? monster.speed : -monster.speed;
+                
+                // Jump if close enough horizontally
+                const horizontalDistance = needsToMoveRight ? 
+                    platform.x - monster.x : 
+                    monster.x - (platform.x + platform.width);
+                    
+                if (Math.abs(horizontalDistance) < 150) {
+                    const heightDiff = monsterRect.y - platform.y;
+                    // Adjust jump strength based on height
+                    return { shouldJump: true, jumpStrength: Math.min(1.3, 1.0 + heightDiff / 400) };
+                }
+            } else if (monster.x >= platform.x && monster.x <= platform.x + platform.width) {
+                // Already aligned, just jump
+                return { shouldJump: true, jumpStrength: 1.1 };
+            }
+        }
+    }
+    return null;
+}
+
 // Update monster position (platformer AI)
 function updateMonster(monster) {
     // Store last position
@@ -415,19 +537,44 @@ function updateMonster(monster) {
     const dx = player.x - monster.x;
     const distance = Math.abs(dx);
     
+    // Check for platform edges and platforms to jump to
+    const edgeDetection = detectPlatformEdge(monster);
+    const platformJump = detectPlatformToJump(monster);
+    
     // If player is close, run away horizontally and try to jump!
-    if (distance < 200) {
-        // Run away horizontally
+    if (distance < 250) {
+        // Run away horizontally at full speed
         if (dx > 0) {
             monster.velocityX = -monster.speed; // Run left
         } else {
             monster.velocityX = monster.speed;  // Run right
         }
         
-        // Jump to escape if on ground and player is very close
-        if (distance < 100 && monster.onGround && Math.random() < 0.1) {
-            monster.velocityY = JUMP_STRENGTH * 0.8; // Smaller jump than player
-            monster.onGround = false;
+        // Smart jumping logic
+        if (monster.onGround) {
+            let shouldJump = false;
+            let jumpPower = 1.1;
+            
+            // Check edge detection first (50% chance)
+            if (edgeDetection && Math.random() < 0.5) {
+                shouldJump = true;
+                jumpPower = edgeDetection.jumpStrength;
+            }
+            // Then check platform jumping
+            else if (platformJump) {
+                shouldJump = true;
+                jumpPower = platformJump.jumpStrength;
+            }
+            // Escape jump when very close
+            else if (distance < 100 && Math.random() < 0.15) {
+                shouldJump = true;
+                jumpPower = 1.0;
+            }
+            
+            if (shouldJump) {
+                monster.velocityY = JUMP_STRENGTH * jumpPower;
+                monster.onGround = false;
+            }
         }
         
         monster.isMoving = true;
@@ -436,12 +583,33 @@ function updateMonster(monster) {
         if (!monster.randomDirection || Math.random() < 0.02) {
             monster.randomDirection = Math.random() < 0.5 ? -1 : 1;
         }
-        monster.velocityX = monster.randomDirection * monster.speed * 0.3;
+        monster.velocityX = monster.randomDirection * monster.speed * 0.5;
         
-        // Occasionally jump for fun
-        if (monster.onGround && Math.random() < 0.005) {
-            monster.velocityY = JUMP_STRENGTH * 0.6;
-            monster.onGround = false;
+        // Smart platform navigation even when wandering
+        if (monster.onGround) {
+            let shouldJump = false;
+            let jumpPower = 0.8;
+            
+            // Edge detection with 50% chance
+            if (edgeDetection && Math.random() < 0.5) {
+                shouldJump = true;
+                jumpPower = edgeDetection.jumpStrength;
+            }
+            // Platform jumping
+            else if (platformJump) {
+                shouldJump = true;
+                jumpPower = platformJump.jumpStrength;
+            }
+            // Random fun jump
+            else if (Math.random() < 0.01) {
+                shouldJump = true;
+                jumpPower = 0.6;
+            }
+            
+            if (shouldJump) {
+                monster.velocityY = JUMP_STRENGTH * jumpPower;
+                monster.onGround = false;
+            }
         }
         
         monster.isMoving = Math.abs(monster.velocityX) > 0.1;
@@ -474,6 +642,66 @@ function drawScore() {
     ctx.fillStyle = 'black';
     ctx.font = 'bold 28px Arial';
     ctx.fillText('Score: ' + score, 20, 40);
+    
+    // Show debug mode status
+    if (debugMode) {
+        ctx.fillStyle = 'red';
+        ctx.font = '16px Arial';
+        ctx.fillText('DEBUG MODE (Press B to toggle)', 20, 65);
+    }
+}
+
+// Draw collision boundaries for debugging
+function drawDebugInfo() {
+    if (!debugMode) return;
+    
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+    
+    // Draw player collision box
+    ctx.strokeRect(
+        player.x - cameraX - player.width/2,
+        player.y - player.height/2,
+        player.width,
+        player.height
+    );
+    
+    // Draw monster collision boxes
+    monsters.forEach(monster => {
+        const screenX = monster.x - cameraX;
+        if (screenX > -monster.width && screenX < canvas.width + monster.width) {
+            ctx.strokeStyle = 'orange';
+            ctx.strokeRect(
+                screenX - monster.width/2,
+                monster.y - monster.height/2,
+                monster.width,
+                monster.height
+            );
+        }
+    });
+    
+    // Draw platform collision boxes
+    ctx.strokeStyle = 'lime';
+    ctx.lineWidth = 2;
+    platforms.forEach(platform => {
+        const screenX = platform.x - cameraX;
+        if (screenX < canvas.width && screenX + platform.width > 0) {
+            ctx.strokeRect(
+                screenX,
+                platform.y,
+                platform.width,
+                platform.height
+            );
+        }
+    });
+    
+    // Draw ground line
+    ctx.strokeStyle = 'blue';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, worldHeight);
+    ctx.lineTo(canvas.width, worldHeight);
+    ctx.stroke();
 }
 
 // Draw the scrolling background
@@ -537,6 +765,9 @@ function gameLoop(timestamp) {
         monsters.forEach(drawSprite);
         drawSprite(player);  // Draw player on top
         drawScore();
+        
+        // Draw debug info on top of everything
+        drawDebugInfo();
         
         
     } catch (error) {
